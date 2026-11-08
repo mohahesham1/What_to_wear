@@ -145,8 +145,8 @@
   <!-- ============ CLOTHES ============ -->
   <section id="wardrobe">
     <p class="muted">Select as many photos as you like in each box (Ctrl+click or drag a whole batch).
-      One item per photo, on a plain background, works best. Put jackets and hoodies in <b>Tops</b>:
-      the layering (shirt + jacket, hoodie + jacket, shirt + hoodie + jacket…) is worked out for you.</p>
+      One item per photo, on a plain background, works best. Put jackets, hoodies and shirts all in <b>Tops</b>:
+      outfits are layered automatically (shirt + jacket, hoodie + jacket, shirt + hoodie + jacket…).</p>
     <div class="uploads">
       <label class="drop" data-cat="top"><strong>Tops</strong><span class="muted">Shirts, tees, knits, hoodies, jackets, coats</span>
         <span class="count"></span><input type="file" accept="image/*" multiple></label>
@@ -171,7 +171,6 @@
     <div class="wearing" id="wearing"></div>
     <div class="toolbar">
       <label>Season <select id="season"><option value="">Any</option></select></label>
-      <label>Layering <select id="layering"></select></label>
       <label><input type="checkbox" id="showAll"> Show every combination</label>
     </div>
     <p class="muted">Scored on colour harmony, 2026 colour trends, dress level, patterns and season.
@@ -195,13 +194,12 @@
 <script>
 const $ = (s, el = document) => el.querySelector(s);
 const CATS = { top: "Tops", layer: "Tops", bottom: "Bottoms", shoes: "Shoes" };
-const GROUPS = [["Tops & layers", ["top", "layer"]], ["Bottoms", ["bottom"]], ["Shoes", ["shoes"]]];
-const ROLE_TEXT = { top: "base top", mid: "alone or over a shirt", outer: "worn over a top" };
-const ROLE_OPTS = { auto: "Auto (from type)", top: "Base top only", mid: "Alone or over a shirt", outer: "Over a top (jacket/coat)" };
+const GROUPS = [["Tops", ["top", "layer"]], ["Bottoms", ["bottom"]], ["Shoes", ["shoes"]]];
+const ROLE_TEXT = { top: "worn under layers", mid: "worn alone or over a shirt", outer: "worn over a top" };
 const OUTFIT_KEYS = ["top", "mid", "outer", "bottom", "shoes"];
 const LEVELS = ["lounge", "casual", "smart casual", "business", "formal"];
 const PAGE = 24;
-let options = { colors: [], patterns: [], seasons: [], swatches: {}, layering: {} };
+let options = { colors: [], patterns: [], seasons: [], swatches: {}, types: {} };
 let items = [];
 let pinned = [];       // items you want to wear; outfits are built around them
 let limit = PAGE;      // how many outfits to show ("Show more" adds another page)
@@ -407,6 +405,11 @@ $("#recolorBtn").onclick = async () => {
 
 // ---------- clothes list
 const opts = (list, sel) => list.map(v => `<option ${v === sel ? "selected" : ""}>${esc(v)}</option>`).join("");
+function typeOpts(it) {
+  const list = options.types[it.category] || [];
+  const known = list.includes(it.type);
+  return (known ? "" : `<option value="" selected>choose…</option>`) + opts(list, it.type);
+}
 function itemCard(it) {
   const detected = (it.detected_colors || []).map(d =>
     `<span><i style="background:${esc(d.hex)}"></i> ${esc(d.color)} ${Math.round(d.share * 100)}%</span>`).join("");
@@ -414,8 +417,9 @@ function itemCard(it) {
     <img src="${esc(it.image)}" alt="${esc(it.description || it.type)}" loading="lazy">
     <div class="body">
       ${it.needs_review ? `<div class="flag">Needs review</div>` : ""}
-      <div class="kind"><b>${esc(it.kind)}</b><span class="muted">${isUpper(it) ? esc(ROLE_TEXT[it.slot] || "") : ""}</span></div>
-      <label>Type <input type="text" name="type" value="${esc(it.type)}"></label>
+      <div class="kind"><b>${esc(it.primary_color)} ${esc(it.type)}</b><span class="muted">${isUpper(it) ? esc(ROLE_TEXT[it.slot] || "") : ""}</span></div>
+      ${it.description ? `<div class="muted">${esc(it.description)}</div>` : ""}
+      <label>Item <select name="type">${typeOpts(it)}</select></label>
       <label>Colour <span class="colorline"><span class="swatch" style="background:${sw(it.primary_color)}"></span>
         <select name="primary_color">${opts(options.colors, it.primary_color)}</select></span></label>
       <label>2nd colour <select name="secondary_color">${opts(["none", ...options.colors], it.secondary_color)}</select></label>
@@ -423,8 +427,6 @@ function itemCard(it) {
       <label>Pattern <select name="pattern">${opts(options.patterns, it.pattern)}</select></label>
       <label>Dress level <select name="formality">${[1,2,3,4,5].map(f =>
         `<option value="${f}" ${f === it.formality ? "selected" : ""}>${f} · ${LEVELS[f-1]}</option>`).join("")}</select></label>
-      ${isUpper(it) ? `<label>Worn as <select name="layer_role">${Object.entries(ROLE_OPTS).map(([v, t]) =>
-        `<option value="${v}" ${v === (it.layer_role || "auto") ? "selected" : ""}>${t}</option>`).join("")}</select></label>` : ""}
       <div class="seasons">${options.seasons.map(s =>
         `<label><input type="checkbox" value="${s}" ${it.seasons.includes(s) ? "checked" : ""}>${s}</label>`).join("")}</div>
       <div class="row">
@@ -466,7 +468,6 @@ $("#items").addEventListener("click", async e => {
     formality: +$("[name=formality]", card).value,
     seasons: [...card.querySelectorAll(".seasons input:checked")].map(c => c.value),
   };
-  const role = $("[name=layer_role]", card); if (role) body.layer_role = role.value;
   try {
     const updated = await api(`/api/items/${id}`, { method: "PUT", body: JSON.stringify(body) });
     items = items.map(i => i.id === id ? updated : i);
@@ -533,7 +534,7 @@ function lookCard(o) {
   const ids = Object.fromEntries(keys.map(k => [k, o[k]]));
   return `<div class="look">
     <div class="pics" style="--n:${keys.length}">${keys.map(k => { const it = byId(o[k]); return `<figure class="${pinned.includes(o[k]) ? "pinned" : ""}">
-      <img src="${esc(it?.image)}" alt="${esc(name(it))}"><figcaption>${esc(it?.kind || k)}</figcaption></figure>`; }).join("")}</div>
+      <img src="${esc(it?.image)}" alt="${esc(name(it))}"><figcaption title="${esc(it?.description)}">${esc(it ? `${it.primary_color} ${it.type}` : k)}</figcaption></figure>`; }).join("")}</div>
     <div class="head"><span class="tags"><span class="tag">${esc(o.layering)}</span><span class="tag alt">${esc(o.palette)}</span></span>
       <span class="score ${o.score < 75 ? "low" : ""}">${o.score}</span></div>
     <div>${keys.map(k => esc(name(byId(o[k])))).join(" + ")}</div>
@@ -554,11 +555,11 @@ async function loadOutfits() {
   }
   box.innerHTML = `<div class="empty">Matching…</div>`;
   const all = $("#showAll").checked;
-  const q = new URLSearchParams({ season: $("#season").value, layering: $("#layering").value, pin: pinned.join(","), limit });
+  const q = new URLSearchParams({ season: $("#season").value, pin: pinned.join(","), limit });
   let res;
   try { res = await api(`/api/${all ? "outfits" : "lookbook"}?${q}`); }
   catch (err) { box.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
-  const list = res.outfits, filters = [$("#season").value && "this season", $("#layering").value !== "any" && "this layering",
+  const list = res.outfits, filters = [$("#season").value && "this season",
     pinned.length && (pinned.length === 1 ? "this piece" : "these pieces")].filter(Boolean);
   const forWhat = filters.length ? ` with ${filters.join(" and ")}` : "";
   let html = "";
@@ -585,7 +586,7 @@ $("#outfitList").addEventListener("click", async e => {
   catch (err) { out.textContent = err.message; }
   btn.disabled = false;
 });
-["#season", "#layering", "#showAll"].forEach(s => $(s).onchange = () => { limit = PAGE; loadOutfits(); });
+["#season", "#showAll"].forEach(s => $(s).onchange = () => { limit = PAGE; loadOutfits(); });
 
 // ---------- suggestions
 async function loadSuggestions() {
@@ -616,7 +617,6 @@ $("#stylistBtn").onclick = async () => {
   checkStatus(); setInterval(checkStatus, 15000);
   options = await api("/api/options");
   $("#season").innerHTML += options.seasons.map(s => `<option>${s}</option>`).join("");
-  $("#layering").innerHTML = Object.entries(options.layering).map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join("");
   items = await api("/api/items");
   renderItems(); loadGapBanner();
 })();

@@ -21,6 +21,7 @@ No pip packages are needed.
 | `OLLAMA_URL`     | `http://localhost:11434` |                                         |
 | `WARDROBE_PORT`  | `8765`                   |                                         |
 | `WARDROBE_PROFILE` | 30-year-old man upgrading to a refined style | Who the AI stylist advises |
+| `WARDROBE_SKIN_TONE` | `medium tan skin with warm-neutral undertones` | Skin-tone context for styling advice |
 
 ## Features
 

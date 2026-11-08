@@ -34,6 +34,13 @@ PROFILE = os.environ.get(
     "WARDROBE_PROFILE",
     "a 30-year-old man upgrading from casual basics to a refined, chic, modern style",
 )
+SKIN_TONE = os.environ.get(
+    "WARDROBE_SKIN_TONE", "medium tan skin with warm-neutral undertones"
+)
+SKIN_TONE_TOP_COLORS = {
+    "camel", "brown", "cream", "beige", "olive", "sage", "rust", "burgundy",
+    "navy", "green", "blue",
+}
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "wardrobe"
@@ -78,6 +85,14 @@ def normalize_tags(raw, category):
         value = str(value or "").strip().lower()
         if value in allowed:
             return value
+        aliases = {
+            "dark blue": "navy", "deep blue": "navy", "midnight blue": "navy",
+            "dark gray": "charcoal", "dark grey": "charcoal",
+            "light gray": "gray", "light grey": "gray",
+            "off-white": "cream", "off white": "cream", "ivory": "cream",
+        }
+        if value in aliases and aliases[value] in allowed:
+            return aliases[value]
         for a in sorted(allowed, key=len, reverse=True):  # "dark navy" -> "navy"
             if a in value:
                 return a
@@ -147,10 +162,12 @@ TAG_SCHEMA = {
 
 def tag_image(image_b64, category):
     prompt = (
-        f"This photo shows one clothing item, a {category}. Describe ONLY that item.\n"
+        f"The upload category is {category}, but identify the specific garment visible in the photo.\n"
+        "Report the main visible color, not the background. Use navy for very dark blue, blue for clearer/brighter blue, "
+        "charcoal for very dark gray, and gray for lighter gray. Do not guess details that cannot be seen.\n"
         "Return JSON with:\n"
-        "- type: short name, e.g. 't-shirt', 'oxford shirt', 'knit polo', 'jeans', 'chinos', "
-        "'pleated trousers', 'sneakers', 'loafers', 'chelsea boots'\n"
+        "- type: the specific garment, not the broad upload category, e.g. 't-shirt', 'oxford shirt', "
+        "'knit polo', 'jacket', 'jeans', 'chinos', 'pleated trousers', 'sneakers', 'loafers', 'chelsea boots'\n"
         "- primary_color and secondary_color (or 'none') from the allowed list. "
         "camel = warm tan/caramel, charcoal = very dark gray, cream = off-white\n"
         "- pattern\n"
@@ -278,6 +295,9 @@ def score_outfit(top, bottom, shoes):
         reasons.append(f"{t} and {b} clash")
 
     look, chic = palette([t, b, s])
+    tone_bonus = 3 if t in SKIN_TONE_TOP_COLORS else 0
+    if tone_bonus:
+        reasons.append("top colour complements your skin tone")
     # Upscale details: graphic prints and gym shoes pull a look down hard.
     penalty = 0
     if any(i["pattern"] == "graphic" for i in outfit):
@@ -305,11 +325,11 @@ def score_outfit(top, bottom, shoes):
         reasons.append("pieces suit different seasons")
 
     total = 100 * (0.35 * max(harmony, 0) + 0.20 * max(chic, 0) + 0.25 * formality
-                   + 0.12 * pattern + 0.08 * season) - penalty
+                   + 0.12 * pattern + 0.08 * season) - penalty + tone_bonus
     if clash:
         total = min(total, GOOD_SCORE - 15)  # a clashing top/bottom is never "good"
     return {
-        "score": max(0, round(total)),
+        "score": min(100, max(0, round(total))),
         "palette": look,
         "occasion": occasion(sum(forms) / 3),
         "reasons": reasons,
@@ -494,6 +514,7 @@ def stylist_prompt(items):
     issues = [g["text"] for g in gaps(items)][:5]
     return (
         f"You are a menswear stylist. Your client is {PROFILE}.\n"
+        f"His skin tone is {SKIN_TONE}; consider which colours near his face are most flattering.\n"
         "Current colour trends: tonal earth tones (chocolate brown, camel, cream), navy with cream, "
         "olive with beige, pink with brown, and a single rich red or burgundy accent on neutrals. "
         "Clean, quiet, well-fitted pieces over logos and graphics.\n\n"
@@ -593,6 +614,8 @@ class Handler(BaseHTTPRequestHandler):
             warning = None
             try:
                 tags = tag_image(image, category)
+                if tags["type"].strip().lower() == category or not tags["description"].strip():
+                    warning = "Auto-tags are incomplete. Please review this item's tags."
             except Exception as e:  # Ollama down, model missing, bad JSON...
                 tags = normalize_tags({}, category)
                 warning = f"Auto-tagging failed ({e}). Please set the tags by hand."
@@ -615,6 +638,7 @@ class Handler(BaseHTTPRequestHandler):
                              for i in outfit)
             prompt = (
                 f"You are a menswear stylist advising {PROFILE}.\n"
+                f"His skin tone is {SKIN_TONE}; consider whether the top colour complements it.\n"
                 f"Outfit: {desc}. Palette: {o['palette']}. Occasion: {o['occasion']}.\n"
                 "In at most 3 short sentences: why it works (or the one change that would make it "
                 "look more refined), and one finishing touch (belt, watch, sock colour, fit or tuck)."

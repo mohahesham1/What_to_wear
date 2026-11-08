@@ -121,6 +121,8 @@
     <div class="uploads">
       <label class="drop" data-cat="top"><strong>Tops</strong><span class="muted">Shirts, tees, knits, polos</span>
         <span class="count"></span><input type="file" accept="image/*" multiple></label>
+      <label class="drop" data-cat="layer"><strong>Layers (optional)</strong><span class="muted">Jackets, hoodies, overshirts</span>
+        <span class="count"></span><input type="file" accept="image/*" multiple></label>
       <label class="drop" data-cat="bottom"><strong>Bottoms</strong><span class="muted">Jeans, chinos, trousers, shorts</span>
         <span class="count"></span><input type="file" accept="image/*" multiple></label>
       <label class="drop" data-cat="shoes"><strong>Shoes</strong><span class="muted">Sneakers, loafers, boots</span>
@@ -161,7 +163,8 @@
 
 <script>
 const $ = (s, el = document) => el.querySelector(s);
-const CATS = { top: "Tops", bottom: "Bottoms", shoes: "Shoes" };
+const CATS = { top: "Tops", layer: "Layers", bottom: "Bottoms", shoes: "Shoes" };
+const REQUIRED_CATS = ["top", "bottom", "shoes"];
 const SWATCH = { black:"#111", charcoal:"#36393d", gray:"#8a8a8a", white:"#fafafa", cream:"#f1e9d8",
   beige:"#d9c8a9", camel:"#c19a6b", khaki:"#b9a77a", brown:"#5a3a24", navy:"#1f2a44", denim:"#41597a",
   blue:"#2c5fbf", "light blue":"#9cc3e6", olive:"#6b6b2e", sage:"#a3b18a", green:"#1f5a3d",
@@ -223,7 +226,7 @@ function resize(file, max = 1024) {
   });
 }
 
-const queue = []; let running = false, done = 0, failed = [];
+const queue = []; let running = false, done = 0, added = 0, duplicates = 0, failed = [];
 function upload(files, category) {
   [...files].filter(f => f.type.startsWith("image/")).forEach(file => queue.push({ file, category }));
   if (!running) runQueue();
@@ -237,23 +240,29 @@ function drawQueue(current) {
     : "";
 }
 async function runQueue() {
-  running = true; done = 0; failed = [];
+  running = true; done = 0; added = 0; duplicates = 0; failed = [];
   while (queue.length) {
     const job = queue.shift();
     drawQueue(job);
     try {
       const image = await resize(job.file);
       const res = await api("/api/items", { method: "POST", body: JSON.stringify({ category: job.category, image }) });
-      items.push(res.item);
-      if (res.warning) failed.push(job.file.name);
-      renderItems();
+      if (res.duplicate) duplicates++;
+      else {
+        added++;
+        items.push(res.item);
+        if (res.warning) failed.push(job.file.name);
+        renderItems();
+      }
     } catch (e) { failed.push(`${job.file.name} (${e.message})`); }
     done++;
   }
   running = false;
-  $("#queue").textContent = failed.length
-    ? `Added ${done} photos. Auto-tagging failed for ${failed.length}; those are marked "Needs review", so set their tags by hand.`
-    : `Added ${done} photo${done === 1 ? "" : "s"}. Check the tags below, then press "Match my outfits".`;
+  const summary = [`Added ${added} photo${added === 1 ? "" : "s"}.`];
+  if (duplicates) summary.push(`Skipped ${duplicates} exact duplicate photo${duplicates === 1 ? "" : "s"}.`);
+  if (failed.length) summary.push(`Auto-tagging needs review for ${failed.length}; update those tags below.`);
+  else summary.push(`Check the tags below, then press "Match my outfits".`);
+  $("#queue").textContent = summary.join(" ");
   loadGapBanner();
 }
 
@@ -292,7 +301,7 @@ function renderItems() {
     $(".count", z).textContent = n ? `${n} uploaded` : "";
   });
   const box = $("#items");
-  if (!items.length) { box.innerHTML = `<h2>Your clothes</h2><div class="empty">Upload your tops, bottoms and shoes to get started.</div>`; return; }
+  if (!items.length) { box.innerHTML = `<h2>Your clothes</h2><div class="empty">Upload your tops, bottoms and shoes to get started. Add layers if you want jackets or hoodies in your outfits.</div>`; return; }
   box.innerHTML = Object.entries(CATS).map(([cat, label]) => {
     const list = items.filter(i => i.category === cat);
     return `<h2>${label} (${list.length})</h2>` +
@@ -338,7 +347,7 @@ async function loadGapBanner() {
 // ---------- outfits
 async function loadOutfits() {
   const box = $("#outfitList");
-  const need = Object.keys(CATS).filter(c => !items.some(i => i.category === c));
+  const need = REQUIRED_CATS.filter(c => !items.some(i => i.category === c));
   if (need.length) { box.innerHTML = `<div class="empty">Add at least one of each first. Missing: ${need.map(c => CATS[c].toLowerCase()).join(", ")}.</div>`; return; }
   box.innerHTML = `<div class="empty">Matching…</div>`;
   const all = $("#showAll").checked;
@@ -350,11 +359,11 @@ async function loadOutfits() {
   }
   box.innerHTML = (all ? "" : `<p class="muted">${list.length} outfits picked for you, spread across your clothes so each piece gets worn.</p>`) +
     `<div class="looks">${list.map(o => `<div class="look">
-      <div class="pics">${["top","bottom","shoes"].map(k => `<img src="${esc(byId(o[k])?.image)}" alt="${esc(name(byId(o[k])))}">`).join("")}</div>
+      <div class="pics">${["top", ...(o.layer ? ["layer"] : []), "bottom", "shoes"].map(k => `<img src="${esc(byId(o[k])?.image)}" alt="${esc(name(byId(o[k])))}">`).join("")}</div>
       <div class="head"><span class="tag">${esc(o.palette)}</span><span class="score ${o.score < 75 ? "low" : ""}">${o.score}</span></div>
-      <div>${["top","bottom","shoes"].map(k => esc(name(byId(o[k])))).join(" + ")}</div>
+      <div>${["top", ...(o.layer ? ["layer"] : []), "bottom", "shoes"].map(k => esc(name(byId(o[k])))).join(" + ")}</div>
       <div class="muted">${esc(o.occasion)}${o.reasons.length ? " · " + esc(o.reasons.join(" · ")) : ""}</div>
-      <button class="btn small" style="margin-top:8px" data-explain='${JSON.stringify({ top: o.top, bottom: o.bottom, shoes: o.shoes })}'>Styling tip</button>
+      <button class="btn small" style="margin-top:8px" data-explain='${JSON.stringify({ top: o.top, ...(o.layer ? { layer: o.layer } : {}), bottom: o.bottom, shoes: o.shoes })}'>Styling tip</button>
       <div class="explain"></div>
     </div>`).join("")}</div>`;
 }

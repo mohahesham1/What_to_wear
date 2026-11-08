@@ -1,6 +1,6 @@
 # Wardrobe AI
 
-Upload photos of your tops, bottoms and shoes. A local vision model (via Ollama) tags each item,
+Upload photos of your tops, optional layers, bottoms and shoes. A local vision model (via Ollama) tags each item,
 simple rules score every outfit combination, and the "What to buy" tab tests common basics against
 your wardrobe to show which purchase unlocks the most new outfits.
 
@@ -25,7 +25,7 @@ No pip packages are needed.
 
 ## Features
 
-- **My clothes:** upload many tops, bottoms and shoes at once; fix any tag the model gets wrong.
+- **My clothes:** upload tops, optional jackets/hoodies/overshirts, bottoms and shoes; exact duplicate photos are skipped.
 - **Match my outfits:** picks your best outfits, spread across your clothes, each with a palette
   name (e.g. "Tonal earth", "Navy & cream") and occasion, plus an AI styling tip.
 - **Suggestions:** missing pieces (no smart shoes, items that match nothing, season gaps), the purchases

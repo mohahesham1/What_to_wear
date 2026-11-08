@@ -9,6 +9,7 @@ Change the model with the WARDROBE_MODEL environment variable (or edit MODEL bel
 """
 
 import base64
+import hashlib
 import itertools
 import json
 import os
@@ -50,6 +51,8 @@ INDEX_FILE = ROOT / "index.html"
 IMG_DIR.mkdir(parents=True, exist_ok=True)
 
 CATEGORIES = ["top", "bottom", "shoes"]
+OPTIONAL_CATEGORIES = ["layer"]
+ITEM_CATEGORIES = CATEGORIES + OPTIONAL_CATEGORIES
 COLORS = [
     "black", "charcoal", "gray", "white", "cream", "beige", "camel", "khaki",
     "brown", "navy", "denim", "blue", "light blue", "olive", "sage", "green",
@@ -75,6 +78,23 @@ def save_items(items):
     tmp = ITEMS_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(items, indent=2), encoding="utf-8")
     tmp.replace(ITEMS_FILE)
+
+
+def find_duplicate_image(image_hash, items):
+    for item in items:
+        if item.get("image_hash") == image_hash:
+            return item
+        item_id = item.get("id", "")
+        if not re.fullmatch(r"[0-9a-f]{32}", item_id):
+            continue
+        path = IMG_DIR / f"{item_id}.jpg"
+        try:
+            existing_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            continue
+        if existing_hash == image_hash:
+            return item
+    return None
 
 
 def normalize_tags(raw, category):
@@ -105,7 +125,7 @@ def normalize_tags(raw, category):
     seasons = [s for s in (raw.get("seasons") or []) if s in SEASONS] or list(SEASONS)
     secondary = str(raw.get("secondary_color") or "none").lower()
     return {
-        "category": category if category in CATEGORIES else "top",
+        "category": category if category in ITEM_CATEGORIES else "top",
         "type": str(raw.get("type") or category)[:40],
         "primary_color": pick(raw.get("primary_color"), COLORS, "gray"),
         "secondary_color": secondary if secondary in COLORS else "none",
@@ -167,7 +187,8 @@ def tag_image(image_b64, category):
         "charcoal for very dark gray, and gray for lighter gray. Do not guess details that cannot be seen.\n"
         "Return JSON with:\n"
         "- type: the specific garment, not the broad upload category, e.g. 't-shirt', 'oxford shirt', "
-        "'knit polo', 'jacket', 'jeans', 'chinos', 'pleated trousers', 'sneakers', 'loafers', 'chelsea boots'\n"
+        "'knit polo', 'jacket', 'hoodie', 'overshirt', 'jeans', 'chinos', 'pleated trousers', "
+        "'sneakers', 'loafers', 'chelsea boots'\n"
         "- primary_color and secondary_color (or 'none') from the allowed list. "
         "camel = warm tan/caramel, charcoal = very dark gray, cream = off-white\n"
         "- pattern\n"
@@ -280,21 +301,32 @@ def occasion(avg_formality):
     return "Formal event"
 
 
-def score_outfit(top, bottom, shoes):
-    outfit = (top, bottom, shoes)
-    t, b, s = (i["primary_color"] for i in outfit)
+def score_outfit(top, bottom, shoes, layer=None):
+    outfit = (top, bottom, shoes) + ((layer,) if layer else ())
+    t, b, s = (i["primary_color"] for i in (top, bottom, shoes))
+    colors = (t, b, s)
     reasons = []
 
-    harmony = 0.5 * color_pair(t, b) + 0.25 * color_pair(t, s) + 0.25 * color_pair(b, s)
-    loud = [c for c in (t, b, s) if c not in NEUTRALS]
-    if len(loud) == 3:
+    if layer:
+        layer_color = layer["primary_color"]
+        colors += (layer_color,)
+        harmony = (0.35 * color_pair(t, b) + 0.15 * color_pair(t, s)
+                   + 0.15 * color_pair(b, s) + 0.20 * color_pair(t, layer_color)
+                   + 0.075 * color_pair(b, layer_color) + 0.075 * color_pair(s, layer_color))
+    else:
+        harmony = 0.5 * color_pair(t, b) + 0.25 * color_pair(t, s) + 0.25 * color_pair(b, s)
+    loud = [c for c in colors if c not in NEUTRALS]
+    if len(loud) >= 3:
         harmony -= 0.2
         reasons.append("three bold colours compete")
     clash = color_pair(t, b) <= 0.15
     if clash:
         reasons.append(f"{t} and {b} clash")
+    if layer and color_pair(t, layer_color) <= 0.15:
+        clash = True
+        reasons.append(f"{t} and {layer_color} clash")
 
-    look, chic = palette([t, b, s])
+    look, chic = palette(colors)
     tone_bonus = 3 if t in SKIN_TONE_TOP_COLORS else 0
     if tone_bonus:
         reasons.append("top colour complements your skin tone")
@@ -303,7 +335,9 @@ def score_outfit(top, bottom, shoes):
     if any(i["pattern"] == "graphic" for i in outfit):
         penalty += 15
         reasons.append("graphic prints read young; swap for a plain knit or shirt")
-    if shoes["formality"] <= 1 and max(top["formality"], bottom["formality"]) >= 2:
+    if shoes["formality"] <= 1 and max(
+        item["formality"] for item in outfit if item is not shoes
+    ) >= 2:
         penalty += 12
         reasons.append("gym trainers; try clean leather sneakers or loafers")
 
@@ -319,7 +353,7 @@ def score_outfit(top, bottom, shoes):
     if patterned >= 2:
         reasons.append("too many patterns")
 
-    common = set(top["seasons"]) & set(bottom["seasons"]) & set(shoes["seasons"])
+    common = set.intersection(*(set(item["seasons"]) for item in outfit))
     season = 1.0 if common else 0.4
     if not common:
         reasons.append("pieces suit different seasons")
@@ -331,7 +365,7 @@ def score_outfit(top, bottom, shoes):
     return {
         "score": min(100, max(0, round(total))),
         "palette": look,
-        "occasion": occasion(sum(forms) / 3),
+        "occasion": occasion(sum(forms) / len(forms)),
         "reasons": reasons,
         "seasons": sorted(common),
     }
@@ -339,12 +373,18 @@ def score_outfit(top, bottom, shoes):
 
 def all_outfits(items, season=None):
     by_cat = {c: [i for i in items if i["category"] == c] for c in CATEGORIES}
+    layers = [None] + [i for i in items if i["category"] == "layer"]
     results = []
-    for top, bottom, shoes in itertools.product(by_cat["top"], by_cat["bottom"], by_cat["shoes"]):
-        o = score_outfit(top, bottom, shoes)
+    for top, bottom, shoes, layer in itertools.product(
+        by_cat["top"], by_cat["bottom"], by_cat["shoes"], layers
+    ):
+        o = score_outfit(top, bottom, shoes, layer)
         if season and season not in o["seasons"]:
             continue
-        results.append({"top": top["id"], "bottom": bottom["id"], "shoes": shoes["id"], **o})
+        outfit = {"top": top["id"], "bottom": bottom["id"], "shoes": shoes["id"]}
+        if layer:
+            outfit["layer"] = layer["id"]
+        results.append({**outfit, **o})
     results.sort(key=lambda o: o["score"], reverse=True)
     return results
 
@@ -359,6 +399,8 @@ def lookbook(items, season=None, limit=12, max_uses=2):
     # Pass 1: best outfits, no piece used more than max_uses times.
     for o in pool:
         ids = (o["top"], o["bottom"], o["shoes"])
+        if o.get("layer"):
+            ids += (o["layer"],)
         if all(uses[i] < max_uses for i in ids):
             picks.append(o)
             uses.update(ids)
@@ -509,7 +551,8 @@ def stylist_prompt(items):
     lines = [f"- {i['category']}: {label(i)}, {i['pattern']}, formality {i['formality']}/5" for i in items]
     picks = lookbook(items, limit=3)
     by_id = {i["id"]: i for i in items}
-    best = [" + ".join(label(by_id[o[k]]) for k in ("top", "bottom", "shoes")) for o in picks]
+    best = [" + ".join(label(by_id[o[k]]) for k in ("top", "layer", "bottom", "shoes") if o.get(k))
+            for o in picks]
     recs = [r["name"] for r in recommendations(items, limit=4)["items"]]
     issues = [g["text"] for g in gaps(items)][:5]
     return (
@@ -602,12 +645,17 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ["api", "items"]:
             category = data.get("category")
             image = (data.get("image") or "").split(",", 1)[-1]  # strip data: prefix
-            if category not in CATEGORIES or not image:
+            if category not in ITEM_CATEGORIES or not image:
                 return self.send_json({"error": "category and image required"}, 400)
             try:
                 raw = base64.b64decode(image, validate=True)
             except ValueError:
                 return self.send_json({"error": "bad image"}, 400)
+            image_hash = hashlib.sha256(raw).hexdigest()
+            with _lock:
+                duplicate = find_duplicate_image(image_hash, load_items())
+                if duplicate:
+                    return self.send_json({"duplicate": True, "existing_item_id": duplicate["id"]})
             item_id = uuid.uuid4().hex
             (IMG_DIR / f"{item_id}.jpg").write_bytes(raw)
 
@@ -620,9 +668,13 @@ class Handler(BaseHTTPRequestHandler):
                 tags = normalize_tags({}, category)
                 warning = f"Auto-tagging failed ({e}). Please set the tags by hand."
             item = {"id": item_id, "image": f"/images/{item_id}.jpg", "added": int(time.time()),
-                    "needs_review": warning is not None, **tags}
+                    "image_hash": image_hash, "needs_review": warning is not None, **tags}
             with _lock:
                 items = load_items()
+                duplicate = find_duplicate_image(image_hash, items)
+                if duplicate:
+                    (IMG_DIR / f"{item_id}.jpg").unlink(missing_ok=True)
+                    return self.send_json({"duplicate": True, "existing_item_id": duplicate["id"]})
                 items.append(item)
                 save_items(items)
             return self.send_json({"item": item, "warning": warning})
@@ -633,9 +685,13 @@ class Handler(BaseHTTPRequestHandler):
                 outfit = [items[data[k]] for k in ("top", "bottom", "shoes")]
             except KeyError:
                 return self.send_json({"error": "unknown item"}, 400)
-            o = score_outfit(*outfit)
+            layer = items.get(data.get("layer")) if data.get("layer") else None
+            if data.get("layer") and layer is None:
+                return self.send_json({"error": "unknown item"}, 400)
+            o = score_outfit(*outfit, layer=layer)
+            styled_items = [outfit[0], *([layer] if layer else []), *outfit[1:]]
             desc = "; ".join(f"{i['category']}: {label(i)} ({i['pattern']}, formality {i['formality']}/5)"
-                             for i in outfit)
+                             for i in styled_items)
             prompt = (
                 f"You are a menswear stylist advising {PROFILE}.\n"
                 f"His skin tone is {SKIN_TONE}; consider whether the top colour complements it.\n"

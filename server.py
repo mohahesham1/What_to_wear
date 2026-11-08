@@ -60,7 +60,15 @@ COLORS = [
 ]
 PATTERNS = ["solid", "striped", "checked", "floral", "graphic", "other"]
 SEASONS = ["spring", "summer", "fall", "winter"]
-LAYER_ROLES = ["auto", "top", "mid", "outer"]
+# Fixed garment labels, so every item says clearly what it is.
+GARMENT_TYPES = {
+    "top": ["t-shirt", "shirt", "polo", "sweater", "cardigan", "hoodie", "sweatshirt", "overshirt",
+            "jacket", "denim jacket", "leather jacket", "bomber jacket", "blazer", "coat",
+            "gilet", "tank top"],
+    "bottom": ["jeans", "chinos", "trousers", "cargo pants", "joggers", "shorts"],
+    "shoes": ["sneakers", "loafers", "boots", "chelsea boots", "dress shoes", "sandals"],
+}
+GARMENT_TYPES["layer"] = GARMENT_TYPES["top"]
 
 # How each colour name tends to look in a photo. Several references per name cover
 # light/dark shades, so a shadowed camel knit still reads as camel. The first entry
@@ -154,11 +162,10 @@ def normalize_tags(raw, category):
         formality = 2
     seasons = [s for s in (raw.get("seasons") or []) if s in SEASONS] or list(SEASONS)
     secondary = str(raw.get("secondary_color") or "none").lower()
-    layer_role = str(raw.get("layer_role") or "auto").lower()
+    category = category if category in ITEM_CATEGORIES else "top"
     return {
-        "category": category if category in ITEM_CATEGORIES else "top",
-        "layer_role": layer_role if layer_role in LAYER_ROLES else "auto",
-        "type": str(raw.get("type") or category)[:40],
+        "category": category,
+        "type": garment_type(raw.get("type"), category),
         "primary_color": pick(raw.get("primary_color"), COLORS, "gray"),
         "secondary_color": secondary if secondary in COLORS else "none",
         "pattern": pick(raw.get("pattern"), PATTERNS, "solid"),
@@ -167,6 +174,25 @@ def normalize_tags(raw, category):
         "material": str(raw.get("material") or "")[:40],
         "description": str(raw.get("description") or "")[:200],
     }
+
+
+def garment_type(value, category):
+    """Map free text ('zip-up hoodie', 'slim denim jeans') onto the fixed garment labels."""
+    allowed = GARMENT_TYPES.get(category, GARMENT_TYPES["top"])
+    text = str(value or "").strip().lower()
+    if text in allowed:
+        return text
+    for t in sorted(allowed, key=len, reverse=True):  # "black leather jacket" -> "leather jacket"
+        if t in text:
+            return t
+    k = kind({"category": category, "type": text})
+    if k in allowed:
+        return k
+    aliases = {"pants": "trousers", "slacks": "trousers", "trainers": "sneakers", "shoe": "dress shoes"}
+    for word, t in aliases.items():
+        if word in text and t in allowed:
+            return t
+    return category  # unknown: flagged for review
 
 
 def label(item):
@@ -226,9 +252,6 @@ def layer_role(item):
     'top'   = base layer only (shirt, tee, polo)
     'mid'   = worn alone or layered over a shirt (hoodie, overshirt, sweater, cardigan)
     'outer' = always over something else, never on its own (jacket, coat, blazer)"""
-    role = item.get("layer_role", "auto")
-    if role in ("top", "mid", "outer"):
-        return role
     k = kind(item)
     if k in OUTER_KINDS:
         return "outer"
@@ -245,7 +268,10 @@ def slot(item):
 
 
 def public_item(item):
-    return {**item, "kind": kind(item), "slot": slot(item)}
+    mapped = garment_type(item.get("type"), item["category"])
+    typ = mapped if mapped != item["category"] else item.get("type", "")
+    shown = {**item, "type": typ}  # older free-text types show as the fixed labels
+    return {**shown, "kind": kind(shown), "slot": slot(shown)}
 
 
 # ---------------------------------------------------------------- photo colours
@@ -368,6 +394,12 @@ TAG_SCHEMA = {
 }
 
 
+def tag_schema(category):
+    schema = json.loads(json.dumps(TAG_SCHEMA))
+    schema["properties"]["type"] = {"type": "string", "enum": GARMENT_TYPES[category]}
+    return schema
+
+
 def tag_image(image_b64, category, measured=None):
     detected = [f"{nearest_color(c['rgb'])} ({round(c['share'] * 100)}%)"
                 for c in clean_measured(measured)]
@@ -381,19 +413,20 @@ def tag_image(image_b64, category, measured=None):
         "charcoal for very dark gray, and gray for lighter gray. Do not guess details that cannot be seen.\n"
         + hint +
         "Return JSON with:\n"
-        "- type: the specific garment, not the broad upload category, e.g. 't-shirt', 'oxford shirt', "
-        "'knit polo', 'sweater', 'zip hoodie', 'overshirt', 'denim jacket', 'bomber jacket', "
-        "'blazer', 'overcoat', 'jeans', 'chinos', 'pleated trousers', "
-        "'sneakers', 'loafers', 'chelsea boots'\n"
+        f"- type: exactly one of: {', '.join(GARMENT_TYPES[category])}. "
+        "A hoodie has a hood; a jacket or coat is outerwear that opens at the front and is worn over "
+        "other clothes; an overshirt is a heavy button-up shirt worn open; jeans are denim, chinos are "
+        "cotton twill, trousers are smart or wool pants\n"
         "- primary_color and secondary_color (or 'none') from the allowed list. "
         "camel = warm tan/caramel, charcoal = very dark gray, cream = off-white\n"
         "- pattern\n"
         "- formality from 1 (gym/lounge) 2 (casual) 3 (smart casual) 4 (business) 5 (formal)\n"
         "- seasons it suits\n"
         "- material, e.g. cotton, linen, denim, wool, suede, leather\n"
-        "- description: one short sentence"
+        "- description: one short sentence naming the garment and its details, e.g. "
+        "'Navy zip-up cotton hoodie with a drawstring hood' or 'Light-wash straight-leg denim jeans'"
     )
-    content = ollama_chat(prompt, image_b64=image_b64, schema=TAG_SCHEMA)
+    content = ollama_chat(prompt, image_b64=image_b64, schema=tag_schema(category))
     return normalize_tags(json.loads(content), category)
 
 
@@ -507,7 +540,10 @@ def outfit_ids(o):
 
 def layering_label(top, mid=None, outer=None):
     """Inner to outer, e.g. 'Shirt + hoodie + jacket'."""
-    parts = [kind(i) for i in (top, mid, outer) if i]
+    def name(i):
+        t = garment_type(i.get("type"), i["category"])
+        return t if t != i["category"] else kind(i)
+    parts = [name(i) for i in (top, mid, outer) if i]
     return " + ".join(parts).capitalize()
 
 
@@ -768,7 +804,7 @@ CANDIDATES = [
 def _fake(cat, typ, color, formality, fake_id="candidate"):
     return {"id": fake_id, "category": cat, "type": typ, "primary_color": color,
             "secondary_color": "none", "pattern": "solid", "formality": formality,
-            "seasons": list(SEASONS), "layer_role": "auto"}
+            "seasons": list(SEASONS)}
 
 
 def _candidate_outfits(items, cand, season=None, pinned=(), layering=None):
@@ -1028,7 +1064,7 @@ class Handler(BaseHTTPRequestHandler):
         elif parts == ["api", "options"]:
             self.send_json({"colors": COLORS, "patterns": PATTERNS, "seasons": SEASONS,
                             "swatches": {n: "#%02x%02x%02x" % refs[0] for n, refs in COLOR_REFS.items()},
-                            "layering": LAYERING_MODES, "layer_roles": LAYER_ROLES})
+                            "types": GARMENT_TYPES})
         elif len(parts) == 2 and parts[0] == "images" and re.fullmatch(r"[0-9a-f]{32}\.jpg", parts[1]):
             file = IMG_DIR / parts[1]
             if not file.exists():

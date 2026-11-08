@@ -25,10 +25,13 @@ No pip packages are needed.
 
 ## Features
 
+- **Clear labels:** every item gets a fixed garment label (t-shirt, shirt, hoodie, jacket, denim jacket,
+  jeans, chinos, trousers, sneakers, loafers…) plus a one-line description from the model.
 - **My clothes:** upload tops, bottoms and shoes; exact duplicate photos are skipped. Put jackets,
   hoodies and coats in *Tops*: each piece's layering role is worked out from its type
   (shirt/tee/polo = base top, hoodie/overshirt/sweater = worn alone or over a shirt,
-  jacket/coat/blazer = always worn over a top, never on its own). Override it with *Worn as* on the card.
+  jacket/coat/blazer = always worn over a top, never on its own). There is nothing to set: outfits are
+  layered automatically.
 - **Accurate colours:** the page measures each garment's colours from the photo's pixels
   (background removed, shadows merged) and uses them to check the vision model's colour names.
   The measured colours are shown on each card; *Re-check colours from photos* fixes older items
@@ -38,7 +41,7 @@ No pip packages are needed.
 - **Match my outfits:** many outfits (24 at a time, *Show more* for more), spread across your clothes,
   each labelled with its layering (e.g. "Shirt + jacket", "Hoodie + jacket", "Shirt + hoodie + jacket"),
   a palette name and occasion, plus an AI styling tip. Each photo is captioned with its garment type.
-  Filter by season and by layering.
+  Filter by season.
 - **When nothing works:** if no good outfit fits the pieces or layering you chose, it lists what to buy
   (one piece, or a pair such as a hoodie and a jacket) to make it work, with an example outfit.
 - **Suggestions:** missing pieces (no smart shoes, items that match nothing, season gaps), the purchases

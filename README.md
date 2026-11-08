@@ -1,6 +1,6 @@
 # Wardrobe AI
 
-Upload photos of your tops, optional layers, bottoms and shoes. A local vision model (via Ollama) tags each item,
+Upload photos of your tops (jackets and hoodies included), bottoms and shoes. A local vision model (via Ollama) tags each item,
 simple rules score every outfit combination, and the "What to buy" tab tests common basics against
 your wardrobe to show which purchase unlocks the most new outfits.
 
@@ -25,16 +25,30 @@ No pip packages are needed.
 
 ## Features
 
-- **My clothes:** upload tops, optional jackets/hoodies/overshirts, bottoms and shoes; exact duplicate photos are skipped.
-- **Match my outfits:** picks your best outfits, spread across your clothes, each with a palette
-  name (e.g. "Tonal earth", "Navy & cream") and occasion, plus an AI styling tip.
+- **My clothes:** upload tops, bottoms and shoes; exact duplicate photos are skipped. Put jackets,
+  hoodies and coats in *Tops*: each piece's layering role is worked out from its type
+  (shirt/tee/polo = base top, hoodie/overshirt/sweater = worn alone or over a shirt,
+  jacket/coat/blazer = always worn over a top, never on its own). Override it with *Worn as* on the card.
+- **Accurate colours:** the page measures each garment's colours from the photo's pixels
+  (background removed, shadows merged) and uses them to check the vision model's colour names.
+  The measured colours are shown on each card; *Re-check colours from photos* fixes older items
+  (items you saved by hand are left alone).
+- **Wear this:** pick one or more pieces you want to wear (button on each card, or the picker on the
+  Outfits tab) and get outfits built around them.
+- **Match my outfits:** many outfits (24 at a time, *Show more* for more), spread across your clothes,
+  each labelled with its layering (e.g. "Shirt + jacket", "Hoodie + jacket", "Shirt + hoodie + jacket"),
+  a palette name and occasion, plus an AI styling tip. Each photo is captioned with its garment type.
+  Filter by season and by layering.
+- **When nothing works:** if no good outfit fits the pieces or layering you chose, it lists what to buy
+  (one piece, or a pair such as a hoodie and a jacket) to make it work, with an example outfit.
 - **Suggestions:** missing pieces (no smart shoes, items that match nothing, season gaps), the purchases
   that unlock the most new outfits, and an AI stylist summary.
 
 ## How scoring works
 
 Each outfit gets 0–100 from colour harmony (35%), how current/chic the palette is (20%),
-matching dress level (25%), pattern count (12%) and shared season (8%). Graphic prints, gym
+matching dress level (25%), pattern count (12%) and shared season (8%). With layers, colour
+harmony also checks each layer against the piece under it. Graphic prints, gym
 trainers with normal clothes, and mixed dress levels lose points. 75+ counts as a good outfit.
 
 The chic palettes follow 2026 menswear trends: tonal earth tones (chocolate brown, camel, cream),

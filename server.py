@@ -63,7 +63,7 @@ SEASONS = ["spring", "summer", "fall", "winter"]
 # Fixed garment labels, so every item says clearly what it is.
 GARMENT_TYPES = {
     "top": ["t-shirt", "shirt", "polo", "sweater", "cardigan", "hoodie", "sweatshirt", "overshirt",
-            "jacket", "denim jacket", "leather jacket", "bomber jacket", "blazer", "coat",
+            "jacket", "puffer jacket", "denim jacket", "leather jacket", "bomber jacket", "blazer", "coat",
             "gilet", "tank top"],
     "bottom": ["jeans", "chinos", "trousers", "cargo pants", "joggers", "shorts"],
     "shoes": ["sneakers", "loafers", "boots", "chelsea boots", "dress shoes", "sandals"],
@@ -1126,6 +1126,32 @@ class Handler(BaseHTTPRequestHandler):
                 items.append(item)
                 save_items(items)
             return self.send_json({"item": public_item(item), "warning": warning})
+
+        # Ask the model again what an item is (for items saved without a clear label).
+        if len(parts) == 4 and parts[:2] == ["api", "items"] and ID_RE.match(parts[2])                 and parts[3] == "retag":
+            item = next((i for i in load_items() if i["id"] == parts[2]), None)
+            if item is None:
+                return self.send_json({"error": "not found"}, 404)
+            try:
+                image = base64.b64encode((IMG_DIR / f"{item['id']}.jpg").read_bytes()).decode()
+                tags = tag_image(image, item["category"], data.get("colors"))
+            except Exception as e:
+                return self.send_json({"error": f"AI labelling failed ({e}). Is Ollama running?"}, 502)
+            update = {"type": tags["type"], "description": tags["description"], "material": tags["material"]}
+            if item.get("color_source") != "manual":  # keep colours you set by hand
+                colored, detected = resolve_colors(tags, data.get("colors"))
+                update.update(primary_color=colored["primary_color"], secondary_color=colored["secondary_color"],
+                              pattern=tags["pattern"])
+                if detected:
+                    update.update(detected_colors=detected, color_source="photo")
+            with _lock:
+                items = load_items()
+                for i, it in enumerate(items):
+                    if it["id"] == parts[2]:
+                        items[i] = {**it, **update, "needs_review": update["type"] == it["category"]}
+                        save_items(items)
+                        return self.send_json(public_item(items[i]))
+            return self.send_json({"error": "not found"}, 404)
 
         # Re-check an item's colours from its photo (measured in the browser).
         if len(parts) == 4 and parts[:2] == ["api", "items"] and ID_RE.match(parts[2]) \

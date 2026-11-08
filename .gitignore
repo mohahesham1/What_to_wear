@@ -1,0 +1,4 @@
+.env
+wardrobe/
+__pycache__/
+*.tmp

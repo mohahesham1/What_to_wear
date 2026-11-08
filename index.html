@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wardrobe AI</title>
+<style>
+  :root {
+    --bg: #f5f3ef; --card: #ffffff; --text: #1d1b19; --muted: #6e6a64;
+    --line: #e2ddd5; --accent: #5a3e2b; --accent-soft: #efe6dc;
+    --warn: #9a5b00; --warn-soft: #fff3df; --bad: #a33; --bad-soft: #fbe9e9; --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151413; --card: #1f1d1b; --text: #eeeae4; --muted: #a39d94;
+      --line: #34302c; --accent: #d9b48f; --accent-soft: #3a2e24;
+      --warn: #f0b456; --warn-soft: #3a2c14; --bad: #f08080; --bad-soft: #3a1c1c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+           padding: 16px 24px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .02em; }
+  #status { font-size: 13px; color: var(--muted); }
+  #status.bad { color: var(--bad); }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  nav button { border: 0; background: none; color: var(--muted); padding: 8px 14px;
+               border-radius: 8px; font: inherit; cursor: pointer; }
+  nav button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  section[hidden] { display: none; }
+  h2 { font-size: 16px; margin: 28px 0 10px; }
+  .muted { color: var(--muted); font-size: 13px; }
+
+  .uploads { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .drop { border: 2px dashed var(--line); border-radius: var(--radius); padding: 22px 14px;
+          text-align: center; background: var(--card); cursor: pointer; transition: border-color .15s; }
+  .drop:hover, .drop.over { border-color: var(--accent); }
+  .drop strong { display: block; font-size: 17px; margin-bottom: 4px; }
+  .drop .count { display: block; margin-top: 6px; font-weight: 600; color: var(--accent); font-size: 13px; }
+  .drop input { display: none; }
+  #queue { margin: 12px 0; color: var(--muted); font-size: 14px; min-height: 20px; }
+  progress { width: 100%; height: 6px; accent-color: var(--accent); }
+
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 18px 0 6px; }
+  button.btn { font: inherit; font-size: 14px; padding: 8px 14px; border-radius: 10px; cursor: pointer;
+               border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  button.btn.big { padding: 12px 20px; font-size: 15px; font-weight: 600; }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  button.btn.small { font-size: 13px; padding: 5px 10px; }
+  button.btn.danger { color: var(--bad); }
+  button.btn:disabled { opacity: .5; cursor: default; }
+
+  .gap { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius);
+         background: var(--card); border: 1px solid var(--line); margin-bottom: 8px; }
+  .gap .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--muted); }
+  .gap.high .dot { background: var(--bad); }
+  .gap.medium .dot { background: var(--warn); }
+  .gap .fix { color: var(--muted); font-size: 14px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+  .item { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .item.review { border-color: var(--warn); }
+  .item img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--line); }
+  .item .body { padding: 10px; display: grid; gap: 6px; font-size: 13px; }
+  .item .flag { background: var(--warn-soft); color: var(--warn); padding: 4px 8px; border-radius: 6px; }
+  .item label { display: grid; grid-template-columns: 72px 1fr; align-items: center; gap: 6px; color: var(--muted); }
+  .item select, .item input[type=text] { width: 100%; font: inherit; padding: 3px 4px; color: var(--text);
+          background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  .seasons { display: flex; gap: 6px; flex-wrap: wrap; }
+  .seasons label { display: flex; gap: 3px; color: var(--text); }
+  .row { display: flex; gap: 6px; }
+  .empty { color: var(--muted); padding: 24px; text-align: center; background: var(--card);
+           border: 1px solid var(--line); border-radius: var(--radius); }
+
+  .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .toolbar select { font: inherit; padding: 5px; border-radius: 8px; border: 1px solid var(--line);
+                    background: var(--card); color: var(--text); }
+  .looks { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .look { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+  .look .pics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .look .pics img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: var(--line); }
+  .look .head { display: flex; justify-content: space-between; align-items: baseline; margin: 10px 0 4px; gap: 8px; }
+  .tag { display: inline-block; background: var(--accent-soft); color: var(--accent); border-radius: 999px;
+         padding: 2px 10px; font-size: 12px; font-weight: 600; }
+  .score { font-size: 20px; font-weight: 700; color: var(--accent); }
+  .score.low { color: var(--muted); }
+  .explain { font-size: 14px; margin-top: 8px; white-space: pre-wrap; }
+
+  .rec { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+         background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+         padding: 14px 16px; margin-bottom: 8px; }
+  .swatch { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); display: inline-block;
+            vertical-align: middle; margin-right: 8px; }
+  .gain { font-weight: 700; color: var(--accent); white-space: nowrap; }
+  .stylist { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px;
+             white-space: pre-wrap; margin-top: 10px; }
+  .stylist:empty { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Wardrobe AI</h1>
+    <div id="status">Checking Ollama…</div>
+  </div>
+  <nav>
+    <button data-tab="wardrobe" class="active">My clothes</button>
+    <button data-tab="outfits">Outfits</button>
+    <button data-tab="shop">Suggestions</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ============ CLOTHES ============ -->
+  <section id="wardrobe">
+    <p class="muted">Select as many photos as you like in each box (Ctrl+click or drag a whole batch).
+      One item per photo, on a plain background, works best.</p>
+    <div class="uploads">
+      <label class="drop" data-cat="top"><strong>Tops</strong><span class="muted">Shirts, tees, knits, polos</span>
+        <span class="count"></span><input type="file" accept="image/*" multiple></label>
+      <label class="drop" data-cat="bottom"><strong>Bottoms</strong><span class="muted">Jeans, chinos, trousers, shorts</span>
+        <span class="count"></span><input type="file" accept="image/*" multiple></label>
+      <label class="drop" data-cat="shoes"><strong>Shoes</strong><span class="muted">Sneakers, loafers, boots</span>
+        <span class="count"></span><input type="file" accept="image/*" multiple></label>
+    </div>
+    <div id="queue"></div>
+
+    <div class="actions">
+      <button class="btn big primary" id="matchBtn">Match my outfits</button>
+      <button class="btn big" id="suggestBtn">Suggestions: what to get</button>
+    </div>
+    <div id="gapBanner"></div>
+    <div id="items"></div>
+  </section>
+
+  <!-- ============ OUTFITS ============ -->
+  <section id="outfits" hidden>
+    <div class="toolbar">
+      <label>Season <select id="season"><option value="">Any</option></select></label>
+      <label><input type="checkbox" id="showAll"> Show every combination</label>
+      <span class="muted">Scored on colour harmony, 2026 colour trends, dress level, patterns and season.</span>
+    </div>
+    <div id="outfitList"></div>
+  </section>
+
+  <!-- ============ SUGGESTIONS ============ -->
+  <section id="shop" hidden>
+    <h2 style="margin-top:0">Missing pieces</h2>
+    <div id="gapList"></div>
+    <h2>Best things to buy next</h2>
+    <p class="muted" id="shopIntro"></p>
+    <div id="recList"></div>
+    <h2>Personal stylist</h2>
+    <button class="btn primary" id="stylistBtn">Ask the AI stylist</button>
+    <div class="stylist" id="stylistOut"></div>
+  </section>
+</main>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const CATS = { top: "Tops", bottom: "Bottoms", shoes: "Shoes" };
+const SWATCH = { black:"#111", charcoal:"#36393d", gray:"#8a8a8a", white:"#fafafa", cream:"#f1e9d8",
+  beige:"#d9c8a9", camel:"#c19a6b", khaki:"#b9a77a", brown:"#5a3a24", navy:"#1f2a44", denim:"#41597a",
+  blue:"#2c5fbf", "light blue":"#9cc3e6", olive:"#6b6b2e", sage:"#a3b18a", green:"#1f5a3d",
+  burgundy:"#6d1b2b", red:"#c62828", rust:"#b7472a", orange:"#ef7d22", pink:"#e8a6b4",
+  yellow:"#f2cf3a", purple:"#6a3d9a" };
+const LEVELS = ["lounge", "casual", "smart casual", "business", "formal"];
+let options = { colors: [], patterns: [], seasons: [] };
+let items = [];
+
+const api = async (path, opts = {}) => {
+  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+};
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const byId = id => items.find(i => i.id === id);
+const name = i => i ? `${i.primary_color} ${i.type}` : "?";
+
+// ---------- tabs
+function showTab(tab) {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x.dataset.tab === tab));
+  document.querySelectorAll("main section").forEach(s => s.hidden = s.id !== tab);
+  if (tab === "outfits") loadOutfits();
+  if (tab === "shop") loadSuggestions();
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+$("#matchBtn").onclick = () => showTab("outfits");
+$("#suggestBtn").onclick = () => showTab("shop");
+
+// ---------- status
+async function checkStatus() {
+  const el = $("#status");
+  try {
+    const s = await api("/api/status");
+    if (!s.ollama) { el.textContent = "Ollama is not running: start it, or tag items by hand."; el.className = "bad"; }
+    else if (!s.model_installed) { el.textContent = `Model missing: run  ollama pull ${s.model}`; el.className = "bad"; }
+    else { el.textContent = `Connected · ${s.model}`; el.className = ""; }
+  } catch { el.textContent = "Server not reachable"; el.className = "bad"; }
+}
+
+// ---------- upload (many files per box, processed one at a time)
+function resize(file, max = 1024) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      resolve(c.toDataURL("image/jpeg", 0.88));
+    };
+    img.onerror = () => reject(new Error(`Can't read ${file.name}`));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+const queue = []; let running = false, done = 0, failed = [];
+function upload(files, category) {
+  [...files].filter(f => f.type.startsWith("image/")).forEach(file => queue.push({ file, category }));
+  if (!running) runQueue();
+  else drawQueue();
+}
+function drawQueue(current) {
+  const total = done + queue.length + (current ? 1 : 0);
+  $("#queue").innerHTML = current
+    ? `Tagging ${esc(CATS[current.category].toLowerCase())}: ${esc(current.file.name)} (${done + 1} of ${total}). The first photo can take a minute while the model loads.
+       <progress value="${done}" max="${total}"></progress>`
+    : "";
+}
+async function runQueue() {
+  running = true; done = 0; failed = [];
+  while (queue.length) {
+    const job = queue.shift();
+    drawQueue(job);
+    try {
+      const image = await resize(job.file);
+      const res = await api("/api/items", { method: "POST", body: JSON.stringify({ category: job.category, image }) });
+      items.push(res.item);
+      if (res.warning) failed.push(job.file.name);
+      renderItems();
+    } catch (e) { failed.push(`${job.file.name} (${e.message})`); }
+    done++;
+  }
+  running = false;
+  $("#queue").textContent = failed.length
+    ? `Added ${done} photos. Auto-tagging failed for ${failed.length}; those are marked "Needs review", so set their tags by hand.`
+    : `Added ${done} photo${done === 1 ? "" : "s"}. Check the tags below, then press "Match my outfits".`;
+  loadGapBanner();
+}
+
+document.querySelectorAll(".drop").forEach(zone => {
+  const cat = zone.dataset.cat;
+  zone.querySelector("input").onchange = e => { upload(e.target.files, cat); e.target.value = ""; };
+  zone.ondragover = e => { e.preventDefault(); zone.classList.add("over"); };
+  zone.ondragleave = () => zone.classList.remove("over");
+  zone.ondrop = e => { e.preventDefault(); zone.classList.remove("over"); upload(e.dataTransfer.files, cat); };
+});
+
+// ---------- clothes list
+const opts = (list, sel) => list.map(v => `<option ${v === sel ? "selected" : ""}>${esc(v)}</option>`).join("");
+function itemCard(it) {
+  return `<div class="item ${it.needs_review ? "review" : ""}" data-id="${it.id}">
+    <img src="${esc(it.image)}" alt="${esc(it.description || it.type)}" loading="lazy">
+    <div class="body">
+      ${it.needs_review ? `<div class="flag">Needs review</div>` : ""}
+      <label>Type <input type="text" name="type" value="${esc(it.type)}"></label>
+      <label>Colour <select name="primary_color">${opts(options.colors, it.primary_color)}</select></label>
+      <label>2nd colour <select name="secondary_color">${opts(["none", ...options.colors], it.secondary_color)}</select></label>
+      <label>Pattern <select name="pattern">${opts(options.patterns, it.pattern)}</select></label>
+      <label>Dress level <select name="formality">${[1,2,3,4,5].map(f =>
+        `<option value="${f}" ${f === it.formality ? "selected" : ""}>${f} · ${LEVELS[f-1]}</option>`).join("")}</select></label>
+      <div class="seasons">${options.seasons.map(s =>
+        `<label><input type="checkbox" value="${s}" ${it.seasons.includes(s) ? "checked" : ""}>${s}</label>`).join("")}</div>
+      <div class="row">
+        <button class="btn small primary" data-act="save">Save</button>
+        <button class="btn small danger" data-act="del">Delete</button>
+      </div>
+    </div></div>`;
+}
+function renderItems() {
+  document.querySelectorAll(".drop").forEach(z => {
+    const n = items.filter(i => i.category === z.dataset.cat).length;
+    $(".count", z).textContent = n ? `${n} uploaded` : "";
+  });
+  const box = $("#items");
+  if (!items.length) { box.innerHTML = `<h2>Your clothes</h2><div class="empty">Upload your tops, bottoms and shoes to get started.</div>`; return; }
+  box.innerHTML = Object.entries(CATS).map(([cat, label]) => {
+    const list = items.filter(i => i.category === cat);
+    return `<h2>${label} (${list.length})</h2>` +
+      (list.length ? `<div class="grid">${list.map(itemCard).join("")}</div>` : `<div class="empty">No ${label.toLowerCase()} yet.</div>`);
+  }).join("");
+}
+$("#items").addEventListener("click", async e => {
+  const btn = e.target.closest("button[data-act]"); if (!btn) return;
+  const card = btn.closest(".item"), id = card.dataset.id;
+  if (btn.dataset.act === "del") {
+    if (!confirm("Delete this item?")) return;
+    await api(`/api/items/${id}`, { method: "DELETE" });
+    items = items.filter(i => i.id !== id); renderItems(); loadGapBanner(); return;
+  }
+  const body = {
+    type: $("[name=type]", card).value,
+    primary_color: $("[name=primary_color]", card).value,
+    secondary_color: $("[name=secondary_color]", card).value,
+    pattern: $("[name=pattern]", card).value,
+    formality: +$("[name=formality]", card).value,
+    seasons: [...card.querySelectorAll(".seasons input:checked")].map(c => c.value),
+  };
+  try {
+    const updated = await api(`/api/items/${id}`, { method: "PUT", body: JSON.stringify(body) });
+    items = items.map(i => i.id === id ? updated : i);
+    renderItems(); loadGapBanner();
+  } catch (err) { alert(err.message); }
+});
+
+// ---------- missing pieces
+const gapHtml = g => `<div class="gap ${g.level}"><span class="dot"></span>
+  <div><div>${esc(g.text)}</div><div class="fix">${esc(g.fix)}</div></div></div>`;
+async function loadGapBanner() {
+  if (!items.length) { $("#gapBanner").innerHTML = ""; return; }
+  const s = await api("/api/suggestions");
+  const top = s.gaps.filter(g => g.level !== "low").slice(0, 3);
+  $("#gapBanner").innerHTML = top.length
+    ? `<h2>Missing pieces</h2>${top.map(gapHtml).join("")}${s.gaps.length > top.length
+        ? `<button class="btn small" onclick="showTab('shop')">See all ${s.gaps.length} suggestions</button>` : ""}`
+    : "";
+}
+
+// ---------- outfits
+async function loadOutfits() {
+  const box = $("#outfitList");
+  const need = Object.keys(CATS).filter(c => !items.some(i => i.category === c));
+  if (need.length) { box.innerHTML = `<div class="empty">Add at least one of each first. Missing: ${need.map(c => CATS[c].toLowerCase()).join(", ")}.</div>`; return; }
+  box.innerHTML = `<div class="empty">Matching…</div>`;
+  const all = $("#showAll").checked;
+  const list = await api(`/api/${all ? "outfits" : "lookbook"}?season=${encodeURIComponent($("#season").value)}`);
+  if (!list.length) {
+    box.innerHTML = `<div class="empty">No strong outfits yet${$("#season").value ? " for this season" : ""}.
+      <br><br><button class="btn primary" onclick="showTab('shop')">See what to get</button></div>`;
+    return;
+  }
+  box.innerHTML = (all ? "" : `<p class="muted">${list.length} outfits picked for you, spread across your clothes so each piece gets worn.</p>`) +
+    `<div class="looks">${list.map(o => `<div class="look">
+      <div class="pics">${["top","bottom","shoes"].map(k => `<img src="${esc(byId(o[k])?.image)}" alt="${esc(name(byId(o[k])))}">`).join("")}</div>
+      <div class="head"><span class="tag">${esc(o.palette)}</span><span class="score ${o.score < 75 ? "low" : ""}">${o.score}</span></div>
+      <div>${["top","bottom","shoes"].map(k => esc(name(byId(o[k])))).join(" + ")}</div>
+      <div class="muted">${esc(o.occasion)}${o.reasons.length ? " · " + esc(o.reasons.join(" · ")) : ""}</div>
+      <button class="btn small" style="margin-top:8px" data-explain='${JSON.stringify({ top: o.top, bottom: o.bottom, shoes: o.shoes })}'>Styling tip</button>
+      <div class="explain"></div>
+    </div>`).join("")}</div>`;
+}
+$("#outfitList").addEventListener("click", async e => {
+  const btn = e.target.closest("button[data-explain]"); if (!btn) return;
+  const out = btn.nextElementSibling;
+  btn.disabled = true; out.textContent = "Thinking…";
+  try { out.textContent = (await api("/api/explain", { method: "POST", body: btn.dataset.explain })).text; }
+  catch (err) { out.textContent = err.message; }
+  btn.disabled = false;
+});
+$("#season").onchange = loadOutfits;
+$("#showAll").onchange = loadOutfits;
+
+// ---------- suggestions
+async function loadSuggestions() {
+  if (!items.length) {
+    $("#gapList").innerHTML = `<div class="empty">Upload your clothes first.</div>`;
+    $("#recList").innerHTML = ""; $("#shopIntro").textContent = ""; return;
+  }
+  const s = await api("/api/suggestions");
+  $("#gapList").innerHTML = s.gaps.length ? s.gaps.map(gapHtml).join("") : `<div class="empty">No gaps. Your basics are covered.</div>`;
+  $("#shopIntro").textContent = `You have ${s.baseline_good} good outfits now. Each piece below is tested against your clothes, ranked by how many new good outfits it creates.`;
+  $("#recList").innerHTML = s.items.length ? s.items.map(x => `<div class="rec">
+      <div><div><span class="swatch" style="background:${SWATCH[x.color] || "#999"}"></span><strong>${esc(x.name)}</strong>
+        <span class="muted"> · ${esc(CATS[x.category])}</span></div>
+        <div class="muted">Wear with your ${esc(x.pairs_with.join(", "))}. Looks: ${esc(x.looks.join(", "))}</div></div>
+      <div class="gain">+${x.new_outfits} outfit${x.new_outfits === 1 ? "" : "s"}</div></div>`).join("")
+    : `<div class="empty">Nothing on the list adds a good outfit. Add more pieces in each category first.</div>`;
+}
+$("#stylistBtn").onclick = async () => {
+  const btn = $("#stylistBtn"), out = $("#stylistOut");
+  btn.disabled = true; out.textContent = "The stylist is looking at your wardrobe…";
+  try { out.textContent = (await api("/api/stylist", { method: "POST", body: "{}" })).text; }
+  catch (err) { out.textContent = err.message; }
+  btn.disabled = false;
+};
+
+// ---------- init
+(async () => {
+  checkStatus(); setInterval(checkStatus, 15000);
+  options = await api("/api/options");
+  $("#season").innerHTML += options.seasons.map(s => `<option>${s}</option>`).join("");
+  items = await api("/api/items");
+  renderItems(); loadGapBanner();
+})();
+</script>
+</body>
+</html>

@@ -27,6 +27,7 @@ No pip packages are needed.
 
 - **Clear labels:** every item gets a fixed garment label (t-shirt, shirt, hoodie, jacket, denim jacket,
   jeans, chinos, trousers, sneakers, loafers…) plus a one-line description from the model.
+  Items saved without a label (e.g. just "top") are flagged; *Label them with AI* re-runs the model on them.
 - **My clothes:** upload tops, bottoms and shoes; exact duplicate photos are skipped. Put jackets,
   hoodies and coats in *Tops*: each piece's layering role is worked out from its type
   (shirt/tee/polo = base top, hoodie/overshirt/sweater = worn alone or over a shirt,

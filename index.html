@@ -162,6 +162,7 @@
       <button class="btn big" id="suggestBtn">Suggestions: what to get</button>
       <button class="btn big" id="recolorBtn" title="Measures each photo's colours again (skips items you saved by hand)">Re-check colours from photos</button>
     </div>
+    <div id="labelBanner"></div>
     <div id="gapBanner"></div>
     <div id="items"></div>
   </section>
@@ -405,6 +406,7 @@ $("#recolorBtn").onclick = async () => {
 
 // ---------- clothes list
 const opts = (list, sel) => list.map(v => `<option ${v === sel ? "selected" : ""}>${esc(v)}</option>`).join("");
+const unlabelled = it => !(options.types[it.category] || []).includes(it.type);
 function typeOpts(it) {
   const list = options.types[it.category] || [];
   const known = list.includes(it.type);
@@ -417,7 +419,8 @@ function itemCard(it) {
     <img src="${esc(it.image)}" alt="${esc(it.description || it.type)}" loading="lazy">
     <div class="body">
       ${it.needs_review ? `<div class="flag">Needs review</div>` : ""}
-      <div class="kind"><b>${esc(it.primary_color)} ${esc(it.type)}</b><span class="muted">${isUpper(it) ? esc(ROLE_TEXT[it.slot] || "") : ""}</span></div>
+      ${unlabelled(it) ? `<div class="flag">Not labelled yet: choose what it is below, or use "Label them with AI" above.</div>` : ""}
+      <div class="kind"><b>${unlabelled(it) ? `${esc(it.primary_color)} ${esc(it.category)} (unlabelled)` : `${esc(it.primary_color)} ${esc(it.type)}`}</b><span class="muted">${isUpper(it) ? esc(ROLE_TEXT[it.slot] || "") : ""}</span></div>
       ${it.description ? `<div class="muted">${esc(it.description)}</div>` : ""}
       <label>Item <select name="type">${typeOpts(it)}</select></label>
       <label>Colour <span class="colorline"><span class="swatch" style="background:${sw(it.primary_color)}"></span>
@@ -436,7 +439,36 @@ function itemCard(it) {
       </div>
     </div></div>`;
 }
+function renderLabelBanner() {
+  const n = items.filter(unlabelled).length;
+  $("#labelBanner").innerHTML = n && !labelling ? `<div class="gap high"><span class="dot"></span><div style="flex:1">
+    <div>${n} item${n === 1 ? " doesn't" : "s don't"} say what ${n === 1 ? "it is" : "they are"} (hoodie, jacket, jeans…).</div>
+    <div class="fix">The AI can look at the photos again and label them, with a short description.</div></div>
+    <button class="btn small primary" id="labelBtn">Label them with AI</button></div>` : "";
+  if ($("#labelBtn")) $("#labelBtn").onclick = labelAll;
+}
+let labelling = false;
+async function labelAll() {
+  const todo = items.filter(unlabelled);
+  labelling = true; renderLabelBanner(); let ok = 0, err = "";
+  for (const [n, it] of todo.entries()) {
+    $("#queue").innerHTML = `Labelling ${n + 1} of ${todo.length}… <progress value="${n}" max="${todo.length}"></progress>`;
+    try {
+      let colors = [];
+      try { colors = photoColors(await loadImage(it.image)); } catch {}
+      const res = await api(`/api/items/${it.id}/retag`, { method: "POST", body: JSON.stringify({ colors }) });
+      items = items.map(i => i.id === it.id ? res : i);
+      if (!unlabelled(res)) ok++;
+      renderItems();
+    } catch (e) { err = e.message; if (/Ollama/.test(err)) break; }
+  }
+  labelling = false;
+  $("#queue").textContent = `Labelled ${ok} of ${todo.length}.` + (err ? ` ${err}` : "") +
+    (ok < todo.length ? " Pick the rest by hand with the Item dropdown on each card." : "");
+  renderItems(); loadGapBanner();
+}
 function renderItems() {
+  renderLabelBanner();
   document.querySelectorAll(".drop").forEach(z => {
     const cats = z.dataset.cat === "top" ? ["top", "layer"] : [z.dataset.cat];
     const n = items.filter(i => cats.includes(i.category)).length;

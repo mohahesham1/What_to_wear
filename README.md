@@ -50,6 +50,18 @@ No pip packages are needed.
 
 ## How scoring works
 
+Styling rules (in `style_rules()` in `server.py`, easy to extend):
+
+1. One pattern per outfit: two patterned pieces is a clash.
+2. A collar under a patterned layer (e.g. a shirt under a striped sweater) must be plain white/cream
+   or one of the layer's own colours, otherwise it's a clash. A layer counts as patterned when it's
+   tagged that way or its photo shows clearly different colours, even if the model called it plain.
+3. A bold collar colour that doesn't go with a bold layer colour loses points.
+4. Shoes should contrast with the trousers (charcoal sneakers with charcoal jeans lose points).
+5. A patterned top half wants neutral bottoms.
+
+A clash caps the score below 75, so the look is never suggested as a good outfit.
+
 Each outfit gets 0–100 from colour harmony (35%), how current/chic the palette is (20%),
 matching dress level (25%), pattern count (12%) and shared season (8%). With layers, colour
 harmony also checks each layer against the piece under it. Graphic prints, gym

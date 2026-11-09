@@ -59,14 +59,31 @@ Styling rules (in `style_rules()` in `server.py`, easy to extend):
 3. A bold collar colour that doesn't go with a bold layer colour loses points.
 4. Shoes should contrast with the trousers (charcoal sneakers with charcoal jeans lose points).
 5. A patterned top half wants neutral bottoms.
+6. Contrast: two different dark colours side by side (navy + dark brown, navy + black,
+   brown + black) blur into one block. With no light piece (white sneakers, a cream layer) to
+   break them up the outfit loses a lot of points. Lightness is measured from the photo, so
+   navy with *mid* brown or tan is fine.
+7. Shoes must tie back to the outfit: white/cream go with anything; other colours must suit the
+   trousers (e.g. brown chinos → white, cream, tan, brown) or echo a colour worn up top.
+   Gray sneakers under brown chinos lose points.
+8. Dress register: a hoodie on its own goes with jeans, joggers or cargos. With chinos or smart
+   trousers it lands in an awkward middle (fine under a coat or blazer); loafers with a hoodie
+   lose points.
 
 A clash caps the score below 75, so the look is never suggested as a good outfit.
+
+**Colour pairs** come from a men's colour-matching guide (`MATCHES` and `SHOE_MATCHES` in
+`server.py`). Being "neutral" is no longer enough: a pair scores full marks only if it is a
+recommended combination (navy + beige, olive + cream, brown + light blue…). Neutrals that aren't
+listed together score lower, and navy + black or brown + black are marked as hard to pull off.
 
 Each outfit gets 0–100 from colour harmony (35%), how current/chic the palette is (20%),
 matching dress level (25%), pattern count (12%) and shared season (8%). With layers, colour
 harmony also checks each layer against the piece under it. Graphic prints, gym
 trainers with normal clothes, and mixed dress levels lose points. 75+ counts as a good outfit.
 
-The chic palettes follow 2026 menswear trends: tonal earth tones (chocolate brown, camel, cream),
-navy with cream, charcoal with camel, olive with beige, pink with brown, and a single rich
-red/burgundy accent on neutrals. Edit `palette()` and `CANDIDATES` in `server.py` to change them.
+The chic palettes follow fall/winter 2026–27 menswear: warm earth tones (chocolate brown, camel,
+cream) as the base, earth tones with racing/forest green, navy with cream, charcoal with camel,
+olive with beige, brown with light blue, and a single red, burgundy or pink accent on neutrals.
+All-dark outfits with no light piece are named "Dark & flat (low contrast)" and score low.
+Edit `palette()` and `CANDIDATES` in `server.py` to change them.

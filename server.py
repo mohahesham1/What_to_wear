@@ -465,6 +465,91 @@ CLASH_PAIRS = {frozenset(p) for p in [
 ]}
 SOFT_CLASH = {frozenset(("black", "brown"))}
 
+# Which colours actually go together, from menswear colour-matching guides (each colour's
+# "best matching colours" across hoodies, tees, shirts, jackets and trousers). Pairs are
+# symmetric. Being "neutral" is not enough on its own: navy + brown + gray are all neutrals,
+# but that does not make them a good outfit.
+_MATCH_LISTS = {
+    "black": "white gray charcoal beige cream khaki camel burgundy olive denim light blue blue "
+             "brown red pink green yellow orange purple",
+    "white": " ".join(COLORS),  # white goes with practically everything
+    "gray": "black white navy burgundy olive beige cream light blue charcoal camel pink blue "
+            "sage green purple yellow denim",
+    "charcoal": "cream white light blue camel burgundy beige black gray olive pink sage green brown",
+    "navy": "white gray beige cream olive light blue pink camel khaki denim brown burgundy rust "
+            "orange yellow green sage",
+    "light blue": "white navy beige gray brown charcoal khaki camel cream burgundy pink olive denim",
+    "blue": "white black gray navy cream beige brown olive charcoal camel",
+    "denim": "white black gray cream olive camel brown beige navy rust burgundy sage khaki",
+    "beige": "white brown olive navy black charcoal denim burgundy green sage camel rust pink "
+             "light blue blue",
+    "cream": "white brown olive navy black charcoal denim burgundy green sage camel rust pink "
+             "light blue blue",
+    "khaki": "white brown olive navy black denim burgundy green cream light blue",
+    "brown": "cream beige white olive navy light blue camel khaki sage denim rust pink yellow "
+             "green blue gray",
+    "camel": "navy black cream white brown gray charcoal olive denim light blue",
+    "olive": "beige cream white black brown gray navy light blue camel khaki burgundy rust "
+             "orange denim sage pink",
+    "sage": "cream white beige gray brown rust pink olive navy denim",
+    "green": "cream beige black brown gray white navy charcoal camel pink",
+    "burgundy": "black gray white beige navy charcoal cream olive light blue denim pink camel khaki",
+    "red": "black white charcoal navy beige cream gray denim",
+    "rust": "beige cream olive brown denim navy charcoal sage green",
+    "orange": "navy cream olive brown black white denim",
+    "pink": "white navy gray beige brown olive charcoal cream light blue sage green denim black",
+    "yellow": "navy brown olive cream charcoal white gray black beige denim",
+    "purple": "black gray cream beige charcoal white navy brown",
+}
+MATCHES = {c: set() for c in COLORS}
+for _c, _names in _MATCH_LISTS.items():
+    for _m in _names.replace("light blue", "light_blue").split():
+        _m = _m.replace("_", " ")
+        MATCHES[_c].add(_m)
+        MATCHES[_m].add(_c)
+# Technically neutral, but hard to pull off: too little contrast, or they look accidental.
+AVOID_PAIRS = {frozenset(p) for p in [("navy", "black"), ("brown", "black")]}
+
+# Shoe colours that work under each colour (guides' "Shoes" rows). White and cream sneakers
+# go with nearly everything; other shoe colours need to match the outfit or echo one of its colours.
+DEFAULT_SHOES = {"white", "cream", "black", "brown", "camel"}
+SHOE_MATCHES = {
+    "black": {"white", "black", "gray", "charcoal", "brown", "cream"},
+    "white": {"white", "cream", "brown", "black", "camel", "navy", "gray"},
+    "gray": {"white", "black", "gray", "charcoal", "brown", "cream", "navy"},
+    "charcoal": {"white", "black", "brown", "camel", "cream"},
+    "navy": {"white", "brown", "camel", "navy", "cream"},
+    "beige": {"white", "cream", "brown", "camel", "black", "navy"},
+    "cream": {"white", "cream", "brown", "camel", "black", "navy"},
+    "khaki": {"white", "cream", "brown", "camel", "black", "navy"},
+    "brown": {"white", "cream", "brown", "camel", "beige"},
+    "camel": {"white", "cream", "brown", "black", "navy"},
+    "olive": {"white", "camel", "brown", "black", "cream"},
+    "denim": {"white", "black", "gray", "brown", "camel", "cream", "navy"},
+    "blue": {"white", "black", "gray", "brown", "camel", "cream", "navy"},
+    "light blue": {"white", "brown", "camel", "cream", "navy", "gray"},
+    "burgundy": {"white", "black", "brown", "cream"},
+}
+
+# Lightness (CIE L*, 0 = black, 100 = white). Two dark pieces side by side read as one muddy
+# block; a light piece (white sneakers, a cream layer) breaks it up.
+DARK_L = 32
+LIGHT_L = 62
+DARK_NEUTRALS = {"navy", "brown", "black", "charcoal"}
+NAME_L = {name: _lab(refs[0])[0] for name, refs in COLOR_REFS.items()}
+
+
+def lightness(item):
+    """How light the piece really is: measured from the photo when we have it."""
+    for d in item.get("detected_colors") or []:
+        if re.fullmatch(r"#[0-9a-f]{6}", str(d.get("hex", ""))):
+            return _lab([int(d["hex"][i:i + 2], 16) for i in (1, 3, 5)])[0]
+    return NAME_L.get(item["primary_color"], 50)
+
+
+def same_family(a, b):
+    return any(a in fam and b in fam for fam in FAMILIES.values())
+
 
 # ---------------------------------------------------------------- styling rules
 # General rules every outfit is checked against. Each returns (penalty, is_clash, reason).
@@ -536,51 +621,120 @@ def style_rules(top, bottom, shoes, mid=None, outer=None):
     if any(x in busy for x in (top, mid, outer)) and bottom["primary_color"] not in NEUTRALS:
         out.append((6, False, f"patterned top with {bottom['primary_color']} {kind(bottom)} is a lot; "
                               "keep the bottoms neutral"))
+
+    # 6. Contrast: two different dark colours side by side (navy hoodie + dark brown chinos,
+    #    navy + black, brown + black) read as one muddy block unless a light piece breaks it up.
+    upper = outer or mid or top
+    uc, bc = upper["primary_color"], bottom["primary_color"]
+    if (uc != bc and {uc, bc} <= DARK_NEUTRALS and not same_family(uc, bc)
+            and lightness(upper) < DARK_L and lightness(bottom) < DARK_L):
+        breaker = any(lightness(x) >= LIGHT_L for x in pieces if x is not upper and x is not bottom)
+        if breaker:
+            out.append((5, False, f"{uc} over {bc} is low contrast; the light piece is what "
+                                  "keeps it working, so don't swap it out"))
+        else:
+            out.append((14, False, f"{uc} {kind(upper)} and {bc} {kind(bottom)} are both dark, so there is "
+                                   "no contrast and they blur into one block; switch to lighter trousers (beige, stone, "
+                                   "light-wash denim), or add white sneakers or a light layer"))
+
+    # 7. Shoes should tie back to the outfit: white/cream go with anything, other colours must
+    #    suit the trousers or echo a colour worn up top (gray sneakers under brown chinos don't).
+    sc = shoes["primary_color"]
+    echoed = set().union(*(item_colors(x) for x in (top, mid, outer) if x))
+    if sc not in SHOE_MATCHES.get(bc, DEFAULT_SHOES) and sc not in echoed:
+        order = ["white", "cream", "camel", "brown", "black", "navy", "gray", "beige", "charcoal"]
+        good = [{"camel": "tan"}.get(x, x) for x in order if x in SHOE_MATCHES.get(bc, DEFAULT_SHOES)]
+        out.append((6, False, f"{sc} {kind(shoes)} don't tie back to anything in the outfit; "
+                              f"with {bc} {kind(bottom)} wear {', '.join(good[:-1])} or {good[-1]}"))
+
+    # 8. Dress register: a hoodie on its own is street/athleisure; with chinos or smart trousers it
+    #    lands in an awkward middle. Jeans, joggers or cargos suit it, or put a coat/blazer over it.
+    if not outer and kind(mid or top) in HOODIE_KINDS:
+        if kind(bottom) in ("chinos", "trousers"):
+            out.append((6, False, f"a {kind(mid or top)} with {kind(bottom)} is neither casual nor smart; "
+                                  "wear it with jeans or joggers, or swap the top for a knit or overshirt"))
+        if kind(shoes) in ("loafers", "dress shoes"):
+            out.append((8, False, f"{kind(shoes)} are too dressy for a {kind(mid or top)}; "
+                                  "wear clean sneakers"))
     return out
 
 
 def color_pair(a, b):
+    """0-1: how well two garment colours go together."""
     if a == b:
         return 0.85 if a in NEUTRALS else 0.5
     pair = frozenset((a, b))
-    if pair in SOFT_CLASH:
-        return 0.65
-    if a in NEUTRALS or b in NEUTRALS:
+    if pair in CLASH_PAIRS:
+        return 0.15
+    if pair in AVOID_PAIRS or pair in SOFT_CLASH:
+        return 0.6
+    if b in MATCHES.get(a, ()):
         return 1.0
     if pair in GOOD_PAIRS:
         return 0.85
-    if pair in CLASH_PAIRS:
-        return 0.15
+    if a in NEUTRALS and b in NEUTRALS:
+        return 0.7  # won't clash, but not a combination anyone recommends either
+    if a in NEUTRALS or b in NEUTRALS:
+        return 0.6
     return 0.45
 
 
-def palette(colors):
+def shoe_pair(garment, shoe):
+    """0-1: how well a shoe colour works under a garment colour."""
+    if shoe in SHOE_MATCHES.get(garment, DEFAULT_SHOES):
+        return 1.0
+    if shoe == garment:
+        return 0.9  # echoing a colour; rule 4 still catches shoes that melt into the trousers
+    if shoe in NEUTRALS:
+        return 0.6
+    return 0.8 * color_pair(garment, shoe)
+
+
+def palette(colors, has_light=True):
     """Name the look and score how chic/current it is (0-1).
-    Based on 2026 trends: tonal earth tones, chocolate/camel, navy & cream,
-    olive & beige, pink & brown, one rich red/burgundy accent on neutrals."""
+    Based on fall/winter 2026-27 menswear: warm earth tones (chocolate, camel, cream) as the
+    base, racing/forest green, navy & cream, olive & beige, and a single red, burgundy or pink
+    accent on neutrals. has_light=False means every piece is dark or mid-tone (no contrast)."""
     c = set(colors)
     loud = [x for x in colors if x not in NEUTRALS]
     has = lambda *xs: any(x in c for x in xs)  # noqa: E731
+    tonal = any(c <= fam for fam in FAMILIES.values())
 
+    if not has_light and len(c) >= 2 and not tonal and not loud:
+        return "Dark & flat (low contrast)", 0.45
     if c <= FAMILIES["earth"] and len(c) >= 2:
         return "Tonal earth (brown · camel · cream)", 1.0
+    if "green" in c and len(c) >= 2 and c - {"green"} <= FAMILIES["earth"] | {"white", "navy", "black"}:
+        return "Earth & racing green", 0.97
     if "navy" in c and has("cream", "beige", "camel") and not loud:
         return "Navy & cream", 0.95
     if "navy" in c and "white" in c and not loud:
         return "Navy & white", 0.9
-    if "charcoal" in c and has("camel", "cream", "brown") and not loud:
+    if "charcoal" in c and has("camel", "cream") and not loud:
         return "Charcoal & camel", 0.95
-    if has("olive", "sage") and has("beige", "cream", "khaki", "camel", "white"):
+    if has("olive", "sage") and has("beige", "cream", "khaki", "camel"):
         return "Olive & beige utility", 0.9
+    if has("olive", "sage") and has("black", "white") and len(loud) == 1:
+        return "Olive & black", 0.88
     if "pink" in c and has("brown", "cream", "camel"):
         return "Pink & brown", 0.9
-    if len(loud) == 1 and loud[0] in {"burgundy", "red", "rust", "green"}:
+    if "brown" in c and "light blue" in c and len(loud) <= 1:
+        return "Brown & light blue", 0.9
+    if "pink" in c and "navy" in c and len(loud) == 1:
+        return "Pink & navy", 0.88
+    if "navy" in c and "olive" in c and len(loud) == 1:
+        return "Navy & olive", 0.88
+    if len(loud) == 1 and loud[0] in {"burgundy", "red", "rust", "green", "pink"}:
         return f"Rich {loud[0]} accent", 0.9
     if "white" in c and has("beige", "cream", "camel") and not loud:
         return "White & beige", 0.88
+    if "black" in c and has("beige", "cream", "khaki", "camel") and not loud:
+        return "Black & beige", 0.85
     for name, fam in FAMILIES.items():
         if c <= fam and len(c) >= 2:
             return f"Tonal {name}", 0.85
+    if "gray" in c and "navy" in c and not loud:
+        return "Gray & navy", 0.82
     if len(c) == 1:
         return "Monochrome", 0.8 if loud == [] else 0.4
     if not loud:
@@ -629,16 +783,16 @@ def score_outfit(top, bottom, shoes, mid=None, outer=None):
     reasons = []
 
     if layers:
-        harmony = 0.35 * color_pair(t, b) + 0.15 * color_pair(t, s) + 0.15 * color_pair(b, s)
+        harmony = 0.35 * color_pair(t, b) + 0.15 * shoe_pair(t, s) + 0.15 * shoe_pair(b, s)
         w = 1 / len(layers)
         under = t
         for x in layers:
             c = x["primary_color"]
             harmony += w * (0.20 * color_pair(under, c) + 0.075 * color_pair(b, c)
-                            + 0.075 * color_pair(s, c))
+                            + 0.075 * shoe_pair(c, s))
             under = c
     else:
-        harmony = 0.5 * color_pair(t, b) + 0.25 * color_pair(t, s) + 0.25 * color_pair(b, s)
+        harmony = 0.5 * color_pair(t, b) + 0.25 * shoe_pair(t, s) + 0.25 * shoe_pair(b, s)
     loud = [c for c in colors if c not in NEUTRALS]
     if len(loud) >= 3:
         harmony -= 0.2
@@ -659,7 +813,7 @@ def score_outfit(top, bottom, shoes, mid=None, outer=None):
         clash = clash or is_clash
         reasons.append(reason)
 
-    look, chic = palette(colors)
+    look, chic = palette(colors, any(lightness(i) >= LIGHT_L for i in outfit))
     tone_bonus = 3 if t in SKIN_TONE_TOP_COLORS else 0
     if tone_bonus:
         reasons.append("top colour complements your skin tone")
@@ -851,6 +1005,9 @@ CANDIDATES = [
     ("top", "Chocolate brown overshirt", "overshirt", "brown", 2),
     ("top", "Olive overshirt", "overshirt", "olive", 2),
     ("top", "Burgundy merino knit", "sweater", "burgundy", 3),
+    ("top", "Racing green merino crewneck", "sweater", "green", 3),
+    ("top", "Dusty pink oxford shirt", "oxford shirt", "pink", 3),
+    ("top", "Chocolate suede jacket", "suede jacket", "brown", 3),
     ("top", "Heavyweight white t-shirt", "t-shirt", "white", 2),
     ("top", "Heavyweight black t-shirt", "t-shirt", "black", 2),
     ("top", "Cream linen shirt", "linen shirt", "cream", 3),
@@ -872,6 +1029,7 @@ CANDIDATES = [
     ("bottom", "Chocolate brown trousers", "trousers", "brown", 3),
     ("bottom", "Olive chinos", "chinos", "olive", 3),
     ("shoes", "White minimal leather sneakers", "sneakers", "white", 2),
+    ("shoes", "Off-white retro suede sneakers", "sneakers", "cream", 2),
     ("shoes", "Brown suede loafers", "loafers", "brown", 4),
     ("shoes", "Dark brown suede chelsea boots", "chelsea boots", "brown", 3),
     ("shoes", "Black leather loafers", "loafers", "black", 4),
@@ -1059,9 +1217,11 @@ def stylist_prompt(items):
     return (
         f"You are a menswear stylist. Your client is {PROFILE}.\n"
         f"His skin tone is {SKIN_TONE}; consider which colours near his face are most flattering.\n"
-        "Current colour trends: tonal earth tones (chocolate brown, camel, cream), navy with cream, "
-        "olive with beige, pink with brown, and a single rich red or burgundy accent on neutrals. "
-        "Clean, quiet, well-fitted pieces over logos and graphics. "
+        "Current colour trends (fall/winter 2026-27): warm earth tones (chocolate brown, camel, "
+        "cream) as the base, racing/forest green, navy with cream, olive with beige, and a single "
+        "red, burgundy or pink accent on neutrals. Clean, quiet, well-fitted pieces over logos and "
+        "graphics. Keep contrast: never put two dark colours (navy, dark brown, black) side by side "
+        "without a light piece to break them up. "
         "Jackets and coats are always worn over a shirt, tee or hoodie.\n\n"
         "Wardrobe:\n" + "\n".join(lines) + "\n\n"
         f"Best outfits found: {'; '.join(best) or 'none yet'}\n"
@@ -1268,9 +1428,15 @@ class Handler(BaseHTTPRequestHandler):
                 f"You are a menswear stylist advising {PROFILE}.\n"
                 f"His skin tone is {SKIN_TONE}; consider whether the top colour complements it.\n"
                 f"Outfit: {desc}. Layering: {o['layering']}. Palette: {o['palette']}. "
-                f"Occasion: {o['occasion']}.\n"
-                "In at most 3 short sentences: why it works (or the one change that would make it "
-                "look more refined), and one finishing touch (belt, watch, sock colour, fit or tuck)."
+                f"Occasion: {o['occasion']}. Score: {o['score']}/100 "
+                f"({'works' if o['score'] >= GOOD_SCORE else 'does NOT work yet'}).\n"
+                f"Issues found by the colour and style rules: {'; '.join(o['reasons']) or 'none'}.\n"
+                "Be honest and agree with the rules: never call an outfit a good match if the score "
+                "says it does not work. Rules of thumb: two dark colours side by side (navy + dark "
+                "brown, navy + black) need a light piece between them; shoes should be white/cream or "
+                "tie back to a colour in the outfit; a hoodie goes with jeans or joggers, not chinos.\n"
+                "In at most 3 short sentences: if it works, why; if not, the one swap that fixes it "
+                "(name the piece and colour). Then one finishing touch (belt, watch, sock colour, fit or tuck)."
             )
             try:
                 return self.send_json({"text": ollama_chat(prompt, timeout=120).strip()})

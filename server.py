@@ -419,7 +419,8 @@ def tag_image(image_b64, category, measured=None):
         "cotton twill, trousers are smart or wool pants\n"
         "- primary_color and secondary_color (or 'none') from the allowed list. "
         "camel = warm tan/caramel, charcoal = very dark gray, cream = off-white\n"
-        "- pattern\n"
+        "- pattern: striped if it has any stripes (including wide colour bands on knits), checked for "
+        "checks/plaid, graphic for prints/logos/text; solid only if it is one plain colour\n"
         "- formality from 1 (gym/lounge) 2 (casual) 3 (smart casual) 4 (business) 5 (formal)\n"
         "- seasons it suits\n"
         "- material, e.g. cotton, linen, denim, wool, suede, leather\n"
@@ -463,6 +464,79 @@ CLASH_PAIRS = {frozenset(p) for p in [
     ("green", "purple"), ("rust", "pink"), ("red", "rust"), ("yellow", "pink"),
 ]}
 SOFT_CLASH = {frozenset(("black", "brown"))}
+
+
+# ---------------------------------------------------------------- styling rules
+# General rules every outfit is checked against. Each returns (penalty, is_clash, reason).
+# A "clash" caps the score below "good", so the outfit is never suggested as a good look.
+COLLARED_KINDS = {"shirt", "polo", "overshirt"}
+DARK_BLOCKS = [{"charcoal", "black"}, {"charcoal", "gray"}, {"navy", "black"}]
+
+
+def item_colors(item):
+    """Every colour visible on a piece: tagged colours plus clear colours measured from the photo."""
+    cs = {item["primary_color"]}
+    if item.get("secondary_color", "none") != "none":
+        cs.add(item["secondary_color"])
+    cs.update(d["color"] for d in item.get("detected_colors") or [] if d.get("share", 0) >= 0.15)
+    return cs
+
+
+def is_busy(item):
+    """Patterned: tagged as a pattern, or the photo shows two or more clearly different colours,
+    each covering a fifth of the garment (catches a striped sweater the model called plain 'gray')."""
+    if item.get("pattern", "solid") != "solid":
+        return True
+    labs = []
+    for d in item.get("detected_colors") or []:
+        if d.get("share", 0) >= 0.2 and re.fullmatch(r"#[0-9a-f]{6}", str(d.get("hex", ""))):
+            labs.append(_lab([int(d["hex"][i:i + 2], 16) for i in (1, 3, 5)]))
+    # Shadows on a plain garment differ a little; real stripes/blocks differ a lot.
+    return any(_dist(a, b) > 35 for i, a in enumerate(labs) for b in labs[i + 1:])
+
+
+def same_shade(a, b):
+    return a == b or any({a, b} == blk for blk in DARK_BLOCKS)
+
+
+def style_rules(top, bottom, shoes, mid=None, outer=None):
+    out = []
+    pieces = [x for x in (top, mid, outer, bottom, shoes) if x]
+    busy = [x for x in pieces if is_busy(x)]
+
+    # 1. One pattern per outfit.
+    if len(busy) >= 2:
+        out.append((10, True, f"two patterns compete ({' and '.join(kind(x) for x in busy[:2])}); "
+                              "keep one patterned piece and make the rest plain"))
+
+    # 2 + 3. What shows at the collar must work with the layer over it.
+    under = top
+    for layer in (mid, outer):
+        if not layer:
+            continue
+        if kind(under) in COLLARED_KINDS:
+            uc, lc = under["primary_color"], layer["primary_color"]
+            if is_busy(layer):
+                allowed = {"white", "cream"} | item_colors(layer)
+                if is_busy(under) or uc not in allowed:
+                    out.append((15, True, f"a {uc} collar under a patterned {kind(layer)} looks busy; "
+                                          f"wear a plain white shirt under it, or a solid {kind(layer)}"))
+            elif (uc not in NEUTRALS and lc not in NEUTRALS and uc != lc
+                  and frozenset((uc, lc)) not in GOOD_PAIRS):
+                out.append((10, False, f"the {uc} collar fights the {lc} {kind(layer)}; "
+                                       "pick a shirt in a neutral or matching colour"))
+        under = layer
+
+    # 4. Shoes should contrast with the trousers, not continue them.
+    if same_shade(bottom["primary_color"], shoes["primary_color"]):
+        out.append((15, False, f"{shoes['primary_color']} shoes blend into {bottom['primary_color']} "
+                               f"{kind(bottom)}; pick a contrasting pair (white sneakers, tan or brown boots)"))
+
+    # 5. A patterned top half wants neutral bottoms.
+    if any(x in busy for x in (top, mid, outer)) and bottom["primary_color"] not in NEUTRALS:
+        out.append((6, False, f"patterned top with {bottom['primary_color']} {kind(bottom)} is a lot; "
+                              "keep the bottoms neutral"))
+    return out
 
 
 def color_pair(a, b):
@@ -579,12 +653,18 @@ def score_outfit(top, bottom, shoes, mid=None, outer=None):
             reasons.append(f"{under['primary_color']} and {x['primary_color']} clash")
         under = x
 
+    rule_penalty = 0
+    for pen, is_clash, reason in style_rules(top, bottom, shoes, mid, outer):
+        rule_penalty += pen
+        clash = clash or is_clash
+        reasons.append(reason)
+
     look, chic = palette(colors)
     tone_bonus = 3 if t in SKIN_TONE_TOP_COLORS else 0
     if tone_bonus:
         reasons.append("top colour complements your skin tone")
     # Upscale details: graphic prints and gym shoes pull a look down hard.
-    penalty = 0
+    penalty = rule_penalty
     if any(i["pattern"] == "graphic" for i in outfit):
         penalty += 15
         reasons.append("graphic prints read young; swap for a plain knit or shirt")
@@ -601,10 +681,8 @@ def score_outfit(top, bottom, shoes, mid=None, outer=None):
         penalty += 8
         reasons.append("dress levels don't match")
 
-    patterned = sum(1 for i in outfit if i["pattern"] != "solid")
+    patterned = sum(1 for i in outfit if is_busy(i))
     pattern = 1.0 if patterned <= 1 else 0.35
-    if patterned >= 2:
-        reasons.append("too many patterns")
 
     common = set.intersection(*(set(item["seasons"]) for item in outfit))
     season = 1.0 if common else 0.4
@@ -614,7 +692,7 @@ def score_outfit(top, bottom, shoes, mid=None, outer=None):
     total = 100 * (0.35 * max(harmony, 0) + 0.20 * max(chic, 0) + 0.25 * formality
                    + 0.12 * pattern + 0.08 * season) - penalty + tone_bonus
     if clash:
-        total = min(total, GOOD_SCORE - 15)  # a clashing top/bottom is never "good"
+        total = min(total, GOOD_SCORE - 15)  # a clash is never "good"
     return {
         "score": min(100, max(0, round(total))),
         "palette": look,
